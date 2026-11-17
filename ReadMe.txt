@@ -39,7 +39,7 @@ Note that MobInfo offers a "Combined Mode" where the data of Mobs with the same 
 ***************************************
 *** Target Frame Health/Mana Values ***
 
-MobInfo can display the numeric and percentage values for your current targets health and mana right on the target frame (formerly known as MobHealth functionality). When MobInfo displays these values, it hides the matching default health or mana text to avoid duplicates. This display is highly configurable through the MobInfo options dialog (position, font, size, etc).
+MobInfo can display the numeric and percentage values for your current targets health and mana right on the target frame (formerly known as MobHealth functionality). This display is highly configurable through the MobInfo options dialog (position, font, size, etc).
 
 
 ******************************
