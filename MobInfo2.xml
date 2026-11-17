@@ -3,7 +3,6 @@
 	<Script file="localization.fr.lua"/> 
 	<Script file="localization.tw.lua"/> 
 	<Script file="MobInfo2.lua" /> 
-	<Script file="MI2_Import.lua" /> 
 	<Script file="MI2_Events.lua" /> 
 	<Script file="MI2_ItemData.lua" /> 
 	<Script file="MI2_Health.lua" /> 
