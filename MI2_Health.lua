@@ -195,6 +195,61 @@ end	 --	MobHealth_Display()
 
 
 -----------------------------------------------------------------------------
+-- MI2_SuppressDefaultTargetStatusText()
+--
+-- Hide Blizzard's default target health/mana text when MobInfo displays
+-- those values itself, so the two don't overlap on the target frame.
+-- (ShaguTweaks' "Real Health Numbers" does the same thing by replacing
+-- the bar's TextString with its own font string.)
+--
+-- Only Blizzard's DEFAULT text is hidden: if another addon has replaced
+-- the bar's TextString with its own font string, that string is left
+-- alone. The default TextString is a child of its own bar, while a
+-- replacement is parented to a different frame.
+-----------------------------------------------------------------------------
+local function MI2_IsDefaultTargetStatusText( statusBar )
+	local textString = statusBar.TextString
+	if  not textString  then
+		return false
+	end
+	return textString:GetParent() == statusBar
+end
+
+local function MI2_HideDefaultTargetStatusText( statusBar )
+	if  MobInfoConfig.DisableHealth ~= 0  then
+		return
+	end
+
+	local hideText
+	if  statusBar == TargetFrameHealthBar  then
+		hideText = MobInfoConfig.TargetHealth == 1 or MobInfoConfig.HealthPercent == 1
+	elseif  statusBar == TargetFrameManaBar  then
+		hideText = MobInfoConfig.TargetMana == 1 or MobInfoConfig.ManaPercent == 1
+	end
+
+	if  hideText and MI2_IsDefaultTargetStatusText( statusBar )  then
+		statusBar.TextString:Hide()
+	end
+end
+
+function MI2_SuppressDefaultTargetStatusText()
+	local originalUpdateTextString = TextStatusBar_UpdateTextString
+
+	TextStatusBar_UpdateTextString = function( statusBar )
+		if  not statusBar  then
+			statusBar = this
+		end
+
+		originalUpdateTextString( statusBar )
+		MI2_HideDefaultTargetStatusText( statusBar )
+	end
+
+	MI2_HideDefaultTargetStatusText( TargetFrameHealthBar )
+	MI2_HideDefaultTargetStatusText( TargetFrameManaBar )
+end
+
+
+-----------------------------------------------------------------------------
 -- MI2_MobHealth_SetFont()
 --
 -- set new font	for	display	of health /	mana in	target frame
