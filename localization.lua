@@ -1,31 +1,13 @@
 -- 
--- Localisation for MobInfo
+-- Default English Localisation for MobInfo
 --
--- created by Stephan Wilms on the 27th of July 2005
---
-
---
--- Default / English localization
+-- created by Stephan Wilms 
 --
 
 MI_DESCRIPTION = "adds information about mobs to the tooltip and adds health/mana info to the target frame"
 
-MI_MOB_DIES_WITH_XP = "(.+) dies, you gain (%d+) experience"
-MI_MOB_DIES_WITHOUT_XP = "(.+) dies"
-MI_PARSE_SPELL_DMG = "(.+)'s (.+) hits you for (%d+)"
-MI_PARSE_BOW_DMG = "(.+)'s (.+) hits you for (%d+)"
-MI_PARSE_COMBAT_DMG = "(.+) hits you for (%d+)"
-MI_PARSE_SELF_MELEE = "You hit (.+) for (%d+)"
-MI_PARSE_SELF_MELEE_CRIT = "You crit (.+) for (%d+)"
-MI_PARSE_SELF_SPELL = "Your (.+) hits (.+) for (%d+)"
-MI_PARSE_SELF_SPELL_CRIT = "Your (.+) crits (.+) for (%d+)"
-MI_PARSE_SELF_BOW = "Your (.+) hits (.+) for (%d+)"
-MI_PARSE_SELF_BOW_CRIT = "Your (.+) crits (.+) for (%d+)"
-MI_PARSE_SELF_PET = "(.+) hits (.+) for (%d+)"
-MI_PARSE_SELF_PET_CRIT = "(.+) crits (.+) for (%d+)"
-MI_PARSE_SELF_PET_SPELL = "(.+)'s (.+) hits (.+) for (%d+)"
-MI_PARSE_SELF_PET_SPELL_CRIT = "(.+)'s (.+) crits (.+) for (%d+)"
-MI_PARSE_SELF_SPELL_PERIODIC = "(.+) suffers (%d+) (.+) damage from your (.+)"
+MI2_SpellSchools = { Arcane="ar", Fire="fi", Frost="fr", Shadow="sh", Holy="ho", Nature="na" }
+
 
 MI_TXT_GOLD   = " Gold"
 MI_TXT_SILVER = " Silver"
@@ -66,6 +48,10 @@ MI_TXT_SHOWING			= "List Shows: "
 MI_TXT_DROPPED_BY		= "Dropped By "
 MI_TXT_LOCATION			= "Location: "
 MI_TXT_DEL_SEARCH_CONFIRM = "Do you really want to DELETE the %d Mobs in the search result list from the MobInfo database ?"
+MI_TXT_WRONG_LOC		= "ERROR : MobInfo database locale is incompatible with your WoW client locale. MobInfo database is unusable until fixed."
+
+MI2_CHATMSG_MONSTEREMOTE = "attempts to run away"
+
 BINDING_HEADER_MI2HEADER	= "MobInfo 2"
 BINDING_NAME_MI2CONFIG	= "Open MobInfo2 Options"
 
@@ -208,6 +194,10 @@ MI2_OPTIONS["MI2_OptShowBlankLines"] =
 { text = "Show Blank Lines"; help = "Show Blank lines in ToolTip";
 info = "Blank lines are meant to improve readability by\ncreating sections in the tooltip" }
 
+MI2_OPTIONS["MI2_OptShowResists"] = 
+{ text = "Resists and Immunities"; help = "Show resistances and immunities in ToolTip";
+info = "Recorded data about the Mobs elemental spell school\nresistances or immunities is added to the tooltip." }
+
 MI2_OPTIONS["MI2_OptCombinedMode"] = 
 { text = "Combine Same Mobs"; help = "Combine data for Mob with same name";
 info = "Combined mode will accumulate the data for Mobs with\nthe same name but different level. When enabled a\nindicator gets displayed in the tooltip" }
@@ -291,14 +281,18 @@ info = "You can choose the quality level of items to be recorded."; }
 
 MI2_OPTIONS["MI2_OptSaveBasicInfo"] = 
 { text = "Record basic Mob info"; help = "Record a set of basic mob information.";
-info = "Basic mob info includes: xp, mob type, counters for: loot, empty loot, cloth, money, items value"; }
+info = "Basic mob info includes: mob type, counters for: loot, empty loot, cloth, money, items value, items quality overview"; }
 
 MI2_OPTIONS["MI2_OptSaveCharData"] = 
 { text = "Record character specific Mob data"; help = "Record all Mob data that is character specific.";
-info = "This will enable or disable saving of the following data:\nnumber of kills, min/max damage, DPS (damage per sec)\n\nThis data is saved separately for each character. Saving it can\nonly be enabled/disabled for the entire set of 4 values"; }
+info = "This will enable or disable saving of the following data:\nnumber of kills, min/max damage, DPS (damage per sec), Mob XP\n\nThis data is saved separately for each character. Saving it can\nonly be enabled/disabled for the entire set of 4 values"; }
 
 MI2_OPTIONS["MI2_OptSaveLocation"] = 
 { text = "Record data describing the Mob location"; help = "Record the area and coordinates where the Mob can be found." }
+
+MI2_OPTIONS["MI2_OptSaveResist"] = 
+{ text = "Record data about Resistances & Immunities"; help = "Record data about a Mobs resistances and immunities to spell schools.";
+info = "For spell schools MobInfo records how many spells per school\nhit successfully versus how many are resisted."; }
 
 MI2_OPTIONS["MI2_OptItemsQuality"] = 
 { text = ""; help = "Record loot item details for selected quality and better.";

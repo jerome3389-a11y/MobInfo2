@@ -1,37 +1,18 @@
 ----------------------
 -- 
--- Localisation for MobInfo
+-- French Localisation for MobInfo
 -- 
 -- created by Sasmira ( Cosmos Team )
 -- updated by Halrik (Curse forum user)
 -- updated by Tieum (ui.worldofwar.net forum user)
 --
--- Last Update : 10-Apr-2006 by Sasmira
--- 
-
--- 
--- French localization
--- 
 
 if ( GetLocale() == "frFR" ) then
 
 MI_DESCRIPTION = "Ajoute une pr\195\169cision d\'information sur un monstre dans la Tooltip";
 
-MI_MOB_DIES_WITH_XP = "(.+) meurt, vous gagnez (%d+) points d\'exp\195\169rience";
-MI_MOB_DIES_WITHOUT_XP = "(.+) meurt";
-MI_PARSE_SPELL_DMG = "(.+) lance (.+) et vous inflige (%d+) points de d\195\169g\195\162ts";
-MI_PARSE_BOW_DMG = "(.+) de (.+) vous inflige (%d+) points de d\195\169g\195\162ts";
-MI_PARSE_COMBAT_DMG = "(.+) vous inflige (%d+) points de d\195\169g\195\162ts";
-MI_PARSE_SELF_MELEE = "Vous touchez (.+) et infligez (%d+) points de d\195\169g\195\162ts";
-MI_PARSE_SELF_MELEE_CRIT = "Vous touchez (.+) avec un coup critique et infligez (%d+) points de d\195\169g\195\162ts";
-MI_PARSE_SELF_SPELL =  "Votre (.+) touche (.+) et lui inflige (%d+) points de d\195\169g\195\162ts";
-MI_PARSE_SELF_SPELL_CRIT = "Votre (.+) inflige un coup critique \195\160 (.+) ((%d+) points de d\195\169g\195\162ts";
-MI_PARSE_SELF_SPELL_PERIODIC = "Votre (.+) inflige (%d+) points de d\195\169g\195\162ts de (.+) \195\160 (.+)";
-MI_PARSE_SELF_BOW = "Votre (.+) touche (.+) et inflige (%d+) points de d\195\169g\195\162ts";
-MI_PARSE_SELF_PET = "(.+) touche (.+) et inflige (%d+) points de d\195\169g\195\162ts";
-MI_PARSE_SELF_PET_CRIT = "(.+) touche (.+) avec un coup critique et inflige (%d+) points de d\195\169g\195\162ts";
-MI_PARSE_SELF_PET_SPELL = "(.+) de (.+) touche (.+) pour (%d+) points de d\195\169g\195\162ts";
-MI_PARSE_SELF_PET_SPELL_CRIT = "(.+) utilise (.+) et touche (.+) avec un coup critique, infligeant (%d+) points de d\195\169g\195\162ts";
+MI2_SpellSchools = { Arcanes="ar", Feu="fi", Givre="fr", Ombre="sh", ["Sacr\195\169"]="ho", Nature="na",
+					 arcanes="ar", feu="fi", givre="fr", ombre="sh", ["sacr\195\169"]="ho", nature="na" }
 
 MI_TXT_GOLD = " Or";
 MI_TXT_SILVER = " Argent";
@@ -72,6 +53,10 @@ MI_TXT_SHOWING			= "Voir Liste: "
 MI_TXT_DROPPED_BY		= "Obtenu sur: "
 MI_TXT_LOCATION			= "Lieu: "
 MI_TXT_DEL_SEARCH_CONFIRM = "Do you really want to DELETE the %d Mobs in the search result list from the MobInfo database ?"
+MI_TXT_WRONG_LOC		= "ERROR : MobInfo database locale is incompatible with your WoW client locale. MobInfo database is unusable until fixed."
+
+MI2_CHATMSG_MONSTEREMOTE = "attempts to run away"
+
 BINDING_NAME_MI2CONFIG	= "Open MobInfo2 Options"
 
 MI2_FRAME_TEXTS = {};
@@ -94,8 +79,6 @@ MI2_FRAME_TEXTS["MI2_FrmImportDatabase"]	= "Import External MobInfo Database"
 -- info is displayed in the help tooltip below the "help" line
 -- info is optional and can be omitted if not required
 --
-
-MI2_OPTIONS = {};
 
 MI2_OPTIONS["MI2_OptSearchMinLevel"] = 
 { text = "Min"; help = "Niveau minimum du monstre pour les options de recherche"; }
@@ -214,6 +197,10 @@ MI2_OPTIONS["MI2_OptShowBlankLines"] =
 { text = "Afficher Ligne blanche"; help = "Affiche une ligne blanche dans la bulle d\'aide";
 info = "" }
 
+MI2_OPTIONS["MI2_OptShowResists"] = 
+{ text = "Resistenzen und Immunit\195\164ten"; help = "Zeigt im Tooltip Resistenzen und Immunit\195\164ten";
+info = "Recorded data about the Mobs elemental spell school\nresistances or immunities is added to the tooltip." }
+
 MI2_OPTIONS["MI2_OptCombinedMode"] =
 { text = "Fusion des monstres identiques"; help = "Regroupe les donn\195\169es des monstres de m\195\170me nom";
 info = "Regroupe les donn\195\169es des monstres de m\195\170me nom \nmais de niveaux diff\195\169rents dans la bulle d\'aide" }
@@ -297,14 +284,18 @@ info = "Cela enregistrera tous les objets: nom, qualit\195\169, quantit\195\169 
 
 MI2_OPTIONS["MI2_OptSaveBasicInfo"] = 
 { text = "Enreg. Mob info de base"; help = "Enregistre un ensemble d\'information de base des monstres.";
-info = "Information de base des monstres inclu: xp, type de monstre, compteur pour: loot, loot vide, tissu, monnaie, valeur des objets"; }
+info = "Information de base des monstres inclu: type de monstre, compteur pour: loot, loot vide, tissu, monnaie, valeur des objets"; }
 
 MI2_OPTIONS["MI2_OptSaveCharData"] = 
 { text = "Sauvegarde de toutes les Data des Mobs sp\195\169cifiques"; help = "Sauvegarde toutes les donn\195\169es des mobs qui ont des caract\195\169ristiques sp\195\169cifiques.";
-info = "Ceci activera ou d\195\169sactivera des donn\195\169es suivantes:\nnombre de morts, min/max dommage, DPS (dommage par sec)\n\nCette donn\195\169e est sauvegard\195\169e s\195\169parement pour chaque personnage.\nLe sauver peut seulement \195\170tre Activer/D\195\169sactiver pour la configuration enti\195\168re de 4 valeurs"; }
+info = "Ceci activera ou d\195\169sactivera des donn\195\169es suivantes:\nnombre de morts, min/max dommage, DPS (dommage par sec), Mob XP\n\nCette donn\195\169e est sauvegard\195\169e s\195\169parement pour chaque personnage.\nLe sauver peut seulement \195\170tre Activer/D\195\169sactiver pour la configuration enti\195\168re de 4 valeurs"; }
 
 MI2_OPTIONS["MI2_OptSaveLocation"] = 
 { text = "Enregistrement de la description du Lieu du Mob"; help = "Enregistre l\'aire et les coordonn\195\169es de l\'endroit ou vous pouvez trouver le monstre." }
+
+MI2_OPTIONS["MI2_OptSaveResist"] = 
+{ text = "Speichern der Daten zu Resistenzen und Immunit\195\164ten"; help = "Speichert Daten zu den magischen Resistenzen und Immunit\195\164ten eines Mobs.";
+info = "Separat pro Magieart wird gez\195\164hlt, wieviele Spells gegen das Monster\nerfolgreich waren und wievielen wiederstanden wurde."; }
 
 MI2_OPTIONS["MI2_OptItemsQuality"] = 
 { text = ""; help = "Enregistre le d\195\169tail des objets ramass\195\169s en s\195\169lectionnant la qualit\195\169 et plus.";
