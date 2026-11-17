@@ -115,12 +115,17 @@ local function MI2_VariablesLoaded()
 	MI2_SetPlayerName()
 	-- load the MobInfo item sell price table
 	MI2_BuildSellPriceTable()
+	-- PERF: detect once which external price sources are available, so
+	-- MI2_FindItemValue() does not check four globals on every pickup.
+	MI2_DetectPriceSources()
 	-- setup event handling for the entire AddOn (MobInfo and MobHealth)
 	MI2_UpdateMobInfoState()
 	-- initialize slash commands processing
 	MI2_SlashInit()
-	-- build cross reference table for fast item tooltips
-	MI2_BuildXRefItemTable()
+	-- PERF: the cross reference table for fast item tooltips is NOT
+	-- built at login any more. It is built lazily on the first item
+	-- hover (see MI2_BuildItemDataTooltip), so a big imported database
+	-- no longer stalls login.
 
 	-- from this point onward process events
 	MI2_InitializeEventTable()
@@ -242,7 +247,12 @@ local function MI2_EventUnitHealth()
 		local health = UnitHealth("target")
 		MI2_Target.unitHealth = health
 
-		if health > 0 and MI2_Target.index then
+		-- PERF: if the server sends real health values (Turtle WoW,
+		-- UnitHealthMax ~= 100), MI2_CalculateHealth() writes the exact
+		-- max health to the DB, so the PPP learning accumulation below
+		-- is skipped entirely.
+		local realHealth = UnitHealthMax("target") ~= 100
+		if health > 0 and MI2_Target.index and not realHealth then
 			-- calculate and sum up change in health percentage, skip negative changes (ie. target heals)
 			local change = MI2_Target.lastPercent - health
 			if change > 0 and MI2_Target.tempDamage > 0 then
@@ -254,10 +264,9 @@ local function MI2_EventUnitHealth()
 				MI2_Target.lastPercent = health
 				MI2_Target.tempDamage = 0
 			end
-			-- update DB immediately for new Mobs to support other AddOns
-			if MI2_Target.totalPercent < 90 then
-				MI2_SaveTargetHealthData() 
-			end
+			-- PERF: no per-tick DB write during learning any more. The
+			-- accumulated data is saved on target change
+			-- (MI2_OnTargetChanged) and on kill (MI2_RecordKill).
 			healthUpdated = true
 		end
 
@@ -282,9 +291,11 @@ end -- MI2_EventUnitHealth()
 -----------------------------------------------------------------------------
 local function MI2_EventUnitMana()
 	if arg1 == "target" then
-		-- recalculate current health and update health display
+		-- PERF: a mana change does not affect health values, so there
+		-- is no need to recalculate health here. MobHealth_Display()
+		-- reads the current mana directly and reuses the last
+		-- calculated health values.
 		MI2_Target.unitHealth = UnitHealth("target")
-		MI2_CalculateHealth()
 		MobHealth_Display( )
 	end
 
@@ -400,14 +411,18 @@ local function MI2_EventSelfSpell( )
 	-- process event only for Mobs
 	if not MI2_Target.mobIndex then return end
 
-	local s,e, spell, mob, damage, school = string.find(arg1, MI2_ChatScanStrings[17])
---if damage then chattext( "DBG: SPELLLOGCRITSCHOOLSELFOTHER: dmg="..damage..", spell="..spell..", school="..school ) end
-	if not damage then
-		s,e, spell, mob, damage, school = string.find(arg1, MI2_ChatScanStrings[7])
+	-- PERF: try the most common spell damage patterns first (normal
+	-- hit with school [7], normal hit [6]) so the average number of
+	-- string.find calls per spell event is minimal. Crit ([17],[8])
+	-- and resist/immune ([14],[15],[16]) patterns stay after them.
+	local s,e, spell, mob, damage, school = string.find(arg1, MI2_ChatScanStrings[7])
 --if damage then chattext( "DBG: SPELLLOGSCHOOLSELFOTHER: dmg="..damage..", spell="..spell..", school="..school ) end
-		if not damage then
-			s,e, spell, mob, damage = string.find(arg1, MI2_ChatScanStrings[6])
+	if not damage then
+		s,e, spell, mob, damage = string.find(arg1, MI2_ChatScanStrings[6])
 --if damage then chattext( "DBG: SPELLLOGSELFOTHER: dmg="..damage..", spell="..spell ) end
+		if not damage then
+			s,e, spell, mob, damage, school = string.find(arg1, MI2_ChatScanStrings[17])
+--if damage then chattext( "DBG: SPELLLOGCRITSCHOOLSELFOTHER: dmg="..damage..", spell="..spell..", school="..school ) end
 			if not damage then
 				s,e, spell, mob, damage = string.find(arg1, MI2_ChatScanStrings[8])
 --if damage then chattext( "DBG: SPELLLOGCRITSELFOTHER: dmg="..damage..", spell="..spell ) end

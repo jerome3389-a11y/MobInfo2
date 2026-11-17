@@ -11,6 +11,11 @@
 local lOldFontId = 0
 local lOldFontSize = 0
 
+-- PERF: last health/mana texts shown in the target frame. MobHealth_Display()
+-- runs on every UNIT_HEALTH/UNIT_MANA tick in combat; SetText is only
+-- needed when the text actually changes.
+local lLastHealthText, lLastManaText
+
 
 --------------------------------------------------------------------------------------------------
 -- external	functions for macros / scripts
@@ -129,6 +134,11 @@ end  -- MobHealth_Set()
 function MI2_CalculateHealth( updateMaxHealth )
 	if MI2_Target.unitHealth > 0 then
 		local curHealthMax = UnitHealthMax("target")  -- have to check because BeastLore changes maxhealth from percent to value
+		-- PERF: real-health fast path. On Turtle WoW the server sends real
+		-- health values (curHealthMax ~= 100), so the exact max health is
+		-- written to the DB here and the PPP learning loop is skipped
+		-- entirely (see MI2_EventUnitHealth, which does not accumulate
+		-- totalDamage/totalPercent in this case).
 		if curHealthMax ~= 100 then
 			if MI2_Target.healthDB then
 				MobHealth_Set( MI2_Target.healthDB, MI2_Target.index, curHealthMax * 25, 2500 )
@@ -189,8 +199,19 @@ function MobHealth_Display( )
 		end
 	end
 
-	MI2_MobHealthText:SetText( healthText or "" )
-	MI2_MobManaText:SetText( manaText or "" )
+	-- PERF: only call SetText when the text changed; the display is
+	-- refreshed on every UNIT_HEALTH/UNIT_MANA tick but the numbers
+	-- usually stay the same between ticks.
+	local newHealthText = healthText or ""
+	local newManaText = manaText or ""
+	if newHealthText ~= lLastHealthText then
+		MI2_MobHealthText:SetText( newHealthText )
+		lLastHealthText = newHealthText
+	end
+	if newManaText ~= lLastManaText then
+		MI2_MobManaText:SetText( newManaText )
+		lLastManaText = newManaText
+	end
 end	 --	MobHealth_Display()
 
 
@@ -273,6 +294,8 @@ local function MI2_MobHealth_SetFont( fontId, fontSize )
 		-- set font	for	health and mana	text
 		MI2_MobHealthText:SetFont( fontName, fontSize )
 		MI2_MobManaText:SetFont( fontName, fontSize )
+		-- PERF: font changed, force the next display to re-set the texts
+		lLastHealthText, lLastManaText = nil, nil
 	end
   
 end	 --	of MI2_MobHealth_SetFont()

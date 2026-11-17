@@ -30,7 +30,27 @@ local MI2_NewCorpseIdx = 0
 local MI2_CurrentCorpseIndex = nil
 local MI2_RecentLoots = {}
 local MI2_SpellToSchool = {}
-local MI2_CACHE_SIZE = 30
+-- PERF: data version counter. Incremented whenever mob data is stored;
+-- the item tooltip cache (#5) and the CombinedMode cache (#8) store the
+-- version they were built from and rebuild when it changed.
+local MI2_DataVersion = 0
+-- PERF: price sources detected once at startup (see
+-- MI2_DetectPriceSources). nil until detected.
+local MI2_HasKC, MI2_HasISync, MI2_HasAuctioneer
+-- PERF: item tooltip sort-result cache, keyed by item name. Each entry
+-- stores { sortList, numMobs, version }. Invalidated by MI2_DataVersion.
+local MI2_ItemTooltipCache = {}
+-- PERF: CombinedMode merged-result cache, keyed by mob index. Each entry
+-- stores { combined, version }. Invalidated by MI2_DataVersion.
+local MI2_CombinedCache = {}
+-- PERF: whether the item cross-reference table has been built. The full
+-- build is deferred to the first item hover (see MI2_BuildItemDataTooltip).
+local MI2_XRefItemTableBuilt = false
+-- PERF: mob data cache enlarged from 30 to 100 entries. The old
+-- 30-entry round-robin cache thrashed when fighting more than 30 mob
+-- types, forcing a full re-decode on every cache miss. 100 entries
+-- costs almost nothing and covers normal farming.
+local MI2_CACHE_SIZE = 100
 
 -- skinning loot table using localization independant item IDs:
 --    Ruined Leather Scraps, Light Leather, Medium Leather, Heavy Leather, Thick Leather, Rugged Leather
@@ -213,7 +233,7 @@ end -- MI2_GetUnitBasedMobData()
 --
 -- Internal function for accessing a mobData record
 -- This function implements a caching mechanism for faster access
--- to database records. The cache stores the last 30 Mob records.
+-- to database records. The cache stores the last 100 Mob records.
 -- Data returned by "MI2_FetchMobData()" should NOT be modified because
 -- modifications are written back into the main database file.
 -----------------------------------------------------------------------------
@@ -427,6 +447,9 @@ local function MI2_StoreBasicInfo( mobIndex, mobData )
 		mobInfo = {}
 		MobInfoDB[mobIndex] = mobInfo
 	end
+	-- PERF: mob data changed, invalidate the item tooltip and
+	-- CombinedMode caches.
+	MI2_DataVersion = MI2_DataVersion + 1
 
 	local mobType = mobData.mobType or 1
 	if mobData.lowHpAction then
@@ -434,12 +457,13 @@ local function MI2_StoreBasicInfo( mobIndex, mobData )
 	end
 
 	local basicInfo = (mobData.loots or "").."/"..(mobData.emptyLoots or "").."/"..(mobData.copper or "").."/"..(mobData.itemValue or "").."/"..(mobData.clothCount or "").."//"..(mobType or "").."/"..(mobData.skinCount or "")
-	if basicInfo ~= "///////" then
+	-- PERF: only write when the encoded string actually changed.
+	if basicInfo ~= "///////" and basicInfo ~= mobInfo.bi then
 		mobInfo.bi = basicInfo
 	end
 
 	local qualityInfo = (mobData.r1 or "").."/"..(mobData.r2 or "").."/"..(mobData.r3 or "").."/"..(mobData.r4 or "").."/"..(mobData.r5 or "")
-	if qualityInfo ~= "////" then
+	if qualityInfo ~= "////" and qualityInfo ~= mobInfo.qi then
 		mobInfo.qi = qualityInfo
 	end
 end -- MI2_StoreBasicInfo()
@@ -456,9 +480,15 @@ function MI2_StoreLocation( mobIndex, loc )
 		mobInfo = {}
 		MobInfoDB[mobIndex] = mobInfo
 	end
+	-- PERF: mob data changed, invalidate the item tooltip and
+	-- CombinedMode caches.
+	MI2_DataVersion = MI2_DataVersion + 1
 
 	local locationInfo = (loc.x1 or "").."/"..(loc.y1 or "").."/"..(loc.x2 or "").."/"..(loc.y2 or "").."//"..(loc.z or "")
-	if locationInfo ~= "/////" then
+	-- PERF: only write when the location actually changed. This is
+	-- called on every target/mouseover and usually re-encodes the
+	-- same location.
+	if locationInfo ~= "/////" and locationInfo ~= mobInfo.ml then
 		mobInfo.ml = locationInfo
 	end
 end -- MI2_StoreLocation()
@@ -475,9 +505,13 @@ local function MI2_StoreCharData( mobIndex, mobData, playerName )
 		mobInfo = {}
 		MobInfoDB[mobIndex] = mobInfo
 	end
+	-- PERF: mob data changed, invalidate the item tooltip and
+	-- CombinedMode caches.
+	MI2_DataVersion = MI2_DataVersion + 1
 
 	local playerInfo = (mobData.kills or "").."/"..(mobData.minDamage or "").."/"..(mobData.maxDamage or "").."/"..(mobData.dps or "").."/"..(mobData.xp or "")
-	if playerInfo ~= "////" then
+	-- PERF: only write when the encoded string actually changed.
+	if playerInfo ~= "////" and playerInfo ~= mobInfo[playerName] then
 		mobInfo[playerName] = playerInfo
 	end
 end -- MI2_StoreCharData()
@@ -494,21 +528,29 @@ local function MI2_StoreLootItems( mobIndex, mobData )
 		mobInfo = {}
 		MobInfoDB[mobIndex] = mobInfo
 	end
+	-- PERF: mob data changed, invalidate the item tooltip and
+	-- CombinedMode caches.
+	MI2_DataVersion = MI2_DataVersion + 1
 
-	-- create loot item list string for database
+	-- PERF: build the loot item list with table.concat instead of
+	-- repeated ".." in a loop (O(n^2) in Lua 5.0), and only write it
+	-- when it actually changed.
 	local itemList = ""
 	if mobData.itemList then
-		local prefix = ""
+		local parts = {}
+		local n = 0
 		for itemID, amount in pairs(mobData.itemList) do
-			itemList = itemList..prefix..itemID
+			n = n + 1
 			if amount > 1 then
-				itemList = itemList..":"..amount
+				parts[n] = itemID..":"..amount
+			else
+				parts[n] = tostring(itemID)
 			end
-			prefix = "/"
 		end
+		itemList = table.concat(parts, "/")
 	end
 
-	if itemList ~= "" then
+	if itemList ~= "" and itemList ~= mobInfo.il then
 		mobInfo.il = itemList
 	end
 end -- MI2_StoreLootItems()
@@ -531,6 +573,9 @@ function MI2_StoreResistData( mobIndex )
 			mobInfo = {}
 			MobInfoDB[mobIndex] = mobInfo
 		end
+		-- PERF: mob data changed, invalidate the item tooltip and
+		-- CombinedMode caches.
+		MI2_DataVersion = MI2_DataVersion + 1
 		local resistString = 
 				(resData.ar or "")..","..(resData.arHits or "").."/"..
 				(resData.fi or "")..","..(resData.fiHits or "").."/"..
@@ -538,7 +583,10 @@ function MI2_StoreResistData( mobIndex )
 				(resData.ho or "")..","..(resData.hoHits or "").."/"..
 				(resData.na or "")..","..(resData.naHits or "").."/"..
 				(resData.sh or "")..","..(resData.shHits or "")
-		mobInfo.re = resistString
+		-- PERF: only write when the encoded string actually changed.
+		if resistString ~= mobInfo.re then
+			mobInfo.re = resistString
+		end
 	end
 end -- MI2_StoreResistData()
 
@@ -716,6 +764,12 @@ function MI2_DeleteAllMobData()
 	MI2_CharTable = { charCount = 0 }
 	MI2_ItemNameTable = {}
 	MI2_XRefItemTable = {}
+	-- PERF: the database was wiped, so the cross reference table must
+	-- be rebuilt on the next item hover, and all derived caches are stale.
+	MI2_XRefItemTableBuilt = false
+	MI2_ItemTooltipCache = {}
+	MI2_CombinedCache = {}
+	MI2_DataVersion = MI2_DataVersion + 1
 	MI2_SetPlayerName()
 	MI2_ClearMobCache()
 	MI2_ZoneTable = { cnt = 1 }
@@ -1059,6 +1113,10 @@ function MI2_BuildXRefItemTable()
 			end
 		end
 	end
+	-- PERF: the cross reference table is now built. The item tooltip
+	-- cache is cleared because it is derived from this table.
+	MI2_XRefItemTableBuilt = true
+	MI2_ItemTooltipCache = {}
 end -- MI2_BuildXRefItemTable()
 
 
@@ -1151,6 +1209,14 @@ end -- MI2_RecordExtraMobType()
 -- name (kill msg gives only name, not level)
 -----------------------------------------------------------------------------
 function MI2_RecordKill( creatureName, xp )
+	-- PERF: save the accumulated health learning data on kill. This
+	-- replaces the old per-tick DB write during learning
+	-- (MI2_EventUnitHealth); the other save point is target change
+	-- (MI2_OnTargetChanged).
+	if MI2_Target.name == creatureName then
+		MI2_SaveTargetHealthData()
+	end
+
 	-- try to find DB index for mob that was killed
 	local mobIndex
 	if MI2_Target.name == creatureName then
@@ -1382,20 +1448,44 @@ end -- lootName2Copper()
 -- Find the item value in either the Auctioneer database or in out own copy
 -- of the Auctioneer item value database or by asking KC_Items
 -----------------------------------------------------------------------------
+-----------------------------------------------------------------------------
+-- MI2_DetectPriceSources()
+--
+-- PERF: detect once which external price sources are available and
+-- remember it, so MI2_FindItemValue() does not have to check four
+-- globals on every pickup. KC_Items and ItemsSync are mutually
+-- exclusive (KC takes precedence); Auctioneer is tried only when the
+-- earlier source returns no price; the built-in table is the final
+-- fallback and always available. Called once at startup and lazily on
+-- first use if needed.
+-----------------------------------------------------------------------------
+function MI2_DetectPriceSources()
+	MI2_HasKC = (KC_Common and KC_Common.GetItemPrices) and true or false
+	MI2_HasISync = (ISync and ISync.FetchDB) and true or false
+	MI2_HasAuctioneer = (Auctioneer_GetVendorBuyPrice) and true or false
+end -- MI2_DetectPriceSources()
+
+
 function MI2_FindItemValue( itemID )
+	-- PERF: price sources were detected once at startup; only the
+	-- cached flags are checked here instead of four globals.
+	if MI2_HasKC == nil then
+		MI2_DetectPriceSources()
+	end
+
 	local price = 0
-	
+
 	-- check if KC_Items is available and knows the price
-	if KC_Common and KC_Common.GetItemPrices then
+	if MI2_HasKC then
 		price = KC_Common:GetItemPrices(itemID) or 0
 
 	-- check if ItemsSync is installed and knows the price
-	elseif ISync and ISync.FetchDB then
+	elseif MI2_HasISync then
 		price = tonumber( ISync:FetchDB(itemID, "price") or 0 )
 	end
 
 	-- check if Auctioneer is installed and knows the price
-	if price == 0 and Auctioneer_GetVendorBuyPrice then
+	if price == 0 and MI2_HasAuctioneer then
 		price = Auctioneer_GetVendorSellPrice(itemID)
 	end
 
@@ -1542,11 +1632,18 @@ function MI2_GetCorpseId( index )
 	local numSlots = GetNumLootItems()
 
 	if index and numSlots > 0 then
-		corpseId = index
+		-- PERF: collect the loot item names in a table and join once
+		-- with table.concat instead of ".." in a loop (O(n^2)).
+		local parts = { index }
+		local n = 1
 		for slot = 1, numSlots do
 			local texture, item = GetLootSlotInfo( slot )
-			if item ~= "" then corpseId = corpseId..item end
+			if item ~= "" then
+				n = n + 1
+				parts[n] = item
+			end
 		end
+		corpseId = table.concat(parts)
 	end
 
 	return corpseId
@@ -2012,7 +2109,27 @@ end -- MI2_CreateCompactTooltip()
 local function MI2_BuildQualityString( mobData )
 	local quality, chance
 	local rt = mobData.loots or 1
- 
+
+	-- PERF: only rebuild the quality string when the underlying
+	-- loot counts changed. The tooltip is rebuilt on every hover
+	-- but the quality data is the same unless a kill/loot updated
+	-- it. The cached inputs live on the mobData table (the cached
+	-- fetch/combined result); they are never written to the
+	-- database because MI2_StoreBasicInfo encodes only named
+	-- fields, and MI2_AddTwoMobs never copies them.
+	if mobData.qualityStr and mobData.qualityLoots == rt
+	   and mobData.qualityR1 == mobData.r1 and mobData.qualityR2 == mobData.r2
+	   and mobData.qualityR3 == mobData.r3 and mobData.qualityR4 == mobData.r4
+	   and mobData.qualityR5 == mobData.r5 then
+		return
+	end
+	mobData.qualityLoots = rt
+	mobData.qualityR1 = mobData.r1
+	mobData.qualityR2 = mobData.r2
+	mobData.qualityR3 = mobData.r3
+	mobData.qualityR4 = mobData.r4
+	mobData.qualityR5 = mobData.r5
+
 	mobData.qualityStr = ""
 	for idx = 1, 5 do
 		quality = mobData["r"..idx]
@@ -2051,22 +2168,34 @@ function MI2_BuildMobInfoTooltip( mobName, mobLevel, showFullLocation )
 	-- handle combined Mob mode : try to find the other Mobs with same
 	-- name but differing level, add their data to the tooltip data
 	if  MobInfoConfig.CombinedMode == 1 and mobLevel > 0 then
-		local combined = { combinedStr = "" }
-		MI2_AddTwoMobs( combined, mobData )
-		for levelToCombine = mobLevel-4, mobLevel+4, 1 do
-			if levelToCombine ~= mobLevel  then
-				local mobIndex = mobName..":"..levelToCombine
-				if MobInfoDB[mobIndex] then
-					local dataToCombine = MI2_FetchMobData( mobIndex )
-					MI2_AddTwoMobs( combined, dataToCombine )
+		-- PERF: reuse the cached merged result when the underlying
+		-- mob data has not changed (MI2_DataVersion). Merging up to
+		-- 9 level variants on every hover is the expensive part. The
+		-- cached table is safe to reuse: MI2_GetUnitBasedMobData
+		-- below overwrites all unit-specific fields (health, mana,
+		-- class, color) with the current mouseover values.
+		local combinedEntry = MI2_CombinedCache[MI2_MouseoverIndex]
+		if combinedEntry and combinedEntry.version == MI2_DataVersion then
+			mobData = combinedEntry.combined
+		else
+			local combined = { combinedStr = "" }
+			MI2_AddTwoMobs( combined, mobData )
+			for levelToCombine = mobLevel-4, mobLevel+4, 1 do
+				if levelToCombine ~= mobLevel  then
+					local mobIndex = mobName..":"..levelToCombine
+					if MobInfoDB[mobIndex] then
+						local dataToCombine = MI2_FetchMobData( mobIndex )
+						MI2_AddTwoMobs( combined, dataToCombine )
+						combined.combinedStr = combined.combinedStr.." L"..levelToCombine
+						combined.color = GetDifficultyColor( levelToCombine )
+					end
+				else
 					combined.combinedStr = combined.combinedStr.." L"..levelToCombine
-					combined.color = GetDifficultyColor( levelToCombine )
 				end
-			else
-				combined.combinedStr = combined.combinedStr.." L"..levelToCombine
 			end
+			MI2_CombinedCache[MI2_MouseoverIndex] = { combined = combined, version = MI2_DataVersion }
+			mobData = combined
 		end
-		mobData = combined
 	end
 
 	-- add unit and xp data for hovered mob
@@ -2135,49 +2264,68 @@ end -- MI2_DebugShowContainerItemInfo()
 function MI2_BuildItemDataTooltip( itemName )
 	if MI2_DebugItems > 0 then MI2_DebugShowContainerItemInfo() end
 
+	-- PERF: the cross reference table is built lazily on the first
+	-- item hover instead of at login (see MI2_VariablesLoaded).
+	if not MI2_XRefItemTableBuilt then
+		MI2_BuildXRefItemTable()
+	end
+
 	-- get the table of all Mobs that drop the item, exit if none
 	local itemFound = MI2_XRefItemTable[itemName]
 	if not itemFound then return false end
 
-	-- Create a list of mobs dropping this item that is indexed by only
-	-- the base Mob name. For each Mob calculate the chance to drop.
-	-- Create a second list referencing the same data that is indexed
-	-- numerically so that it can then be sorted by chance to get.
-	local numMobs = 0
-	local resultList = {}
-	local sortList = {}
-	local mobIndex, itemAmount
-	for mobIndex, itemAmount in pairs(itemFound) do
-		local mobData = {}
-		MI2_DecodeBasicMobData( nil, mobData, mobIndex )
+	-- PERF: reuse the cached sorted drop list when the underlying
+	-- data has not changed (MI2_DataVersion). Building and sorting
+	-- the list over all mobs dropping a popular item is the
+	-- expensive part.
+	local sortList, numMobs
+	local cached = MI2_ItemTooltipCache[itemName]
+	if cached and cached.version == MI2_DataVersion then
+		sortList = cached.sortList
+		numMobs = cached.numMobs
+	else
+		-- Create a list of mobs dropping this item that is indexed by only
+		-- the base Mob name. For each Mob calculate the chance to drop.
+		-- Create a second list referencing the same data that is indexed
+		-- numerically so that it can then be sorted by chance to get.
+		numMobs = 0
+		local resultList = {}
+		sortList = {}
+		local mobIndex, itemAmount
+		for mobIndex, itemAmount in pairs(itemFound) do
+			local mobData = {}
+			MI2_DecodeBasicMobData( nil, mobData, mobIndex )
 
-		local mobName, mobLevel = MI2_GetIndexComponents( mobIndex )
-		local itemData = resultList[mobName]
-		if not itemData then
-			numMobs = numMobs + 1
-			itemData = { name = mobName, loots = 0, count = 0 }
-			resultList[mobName] = itemData
-			sortList[numMobs] = itemData
-		end
-
-		itemData.loots = itemData.loots + (mobData.loots or 0)
-		itemData.count = itemData.count + itemAmount
-		if itemData.loots > 0 then
-			itemData.chance = floor(100.0 * itemData.count / itemData.loots + 0.5)
-			if itemData.chance > 100 then itemData.chance = 100 end
-			if itemData.loots < 6 then
-				itemData.rating = itemData.chance + itemData.loots * 1000
-			else
-				itemData.rating = itemData.chance + 6000
+			local mobName, mobLevel = MI2_GetIndexComponents( mobIndex )
+			local itemData = resultList[mobName]
+			if not itemData then
+				numMobs = numMobs + 1
+				itemData = { name = mobName, loots = 0, count = 0 }
+				resultList[mobName] = itemData
+				sortList[numMobs] = itemData
 			end
-		else
-			itemData.chance = itemData.count
-			itemData.rating = itemData.chance
-		end
-	end
 
-	-- sort list of Mobs by chance to get
-	table.sort( sortList, function(a,b) return (a.rating > b.rating) end  )
+			itemData.loots = itemData.loots + (mobData.loots or 0)
+			itemData.count = itemData.count + itemAmount
+			if itemData.loots > 0 then
+				itemData.chance = floor(100.0 * itemData.count / itemData.loots + 0.5)
+				if itemData.chance > 100 then itemData.chance = 100 end
+				if itemData.loots < 6 then
+					itemData.rating = itemData.chance + itemData.loots * 1000
+				else
+					itemData.rating = itemData.chance + 6000
+				end
+			else
+				itemData.chance = itemData.count
+				itemData.rating = itemData.chance
+			end
+		end
+
+		-- sort list of Mobs by chance to get
+		table.sort( sortList, function(a,b) return (a.rating > b.rating) end  )
+
+		MI2_ItemTooltipCache[itemName] = { sortList = sortList, numMobs = numMobs, version = MI2_DataVersion }
+	end
 
 	-- add Mobs to tooltip
 	GameTooltip:AddLine( mifontLightBlue..MI_TXT_DROPPED_BY..numMobs.." Mobs:" )
@@ -2309,27 +2457,58 @@ end  -- MI2_UpdateMobInfoState()
 --
 -- Update the health and mana values in the Mob tooltip, if they exist.
 -----------------------------------------------------------------------------
+-- PERF: cached tooltip row objects for MI2_UpdateTooltipHealthMana().
+-- The row frames (GameTooltipTextLeftN / TextRightN) are created once
+-- and reused by the tooltip, so looking them up with getglobal() on
+-- every health tick is wasteful. The cache is keyed by tooltip name,
+-- side (left/right) and line number, and refreshed when any changes.
+local MI2_TooltipHealthRow, MI2_TooltipHealthRowKey
+local MI2_TooltipManaRow, MI2_TooltipManaRowKey
+
 function MI2_UpdateTooltipHealthMana( healthCur, healthMax )
 	local tooltip = "GameTooltip"
 	if TipBuddyTooltip then tooltip = "TipBuddyTooltip" end
 	if MI2_HealthLine and healthCur then
 		local healthText = healthCur.." / "..healthMax
+		-- PERF: reuse the cached row object for this tooltip line.
+		-- The side (left/right) depends on CompactMode, so it is
+		-- part of the cache key.
+		local healthSide
 		if MobInfoConfig.CompactMode == 1 then
-			local healthLine = getglobal(tooltip.."TextLeft"..MI2_HealthLine)
-			healthLine:SetText( mifontGold.."HP    "..mifontWhite..healthText )
+			healthSide = "TextLeft"
 		else
-			local healthLine = getglobal(tooltip.."TextRight"..MI2_HealthLine)
-			healthLine:SetText( mifontWhite..healthText )
+			healthSide = "TextRight"
+		end
+		local healthKey = tooltip..healthSide..MI2_HealthLine
+		if MI2_TooltipHealthRowKey ~= healthKey then
+			MI2_TooltipHealthRow = getglobal(healthKey)
+			MI2_TooltipHealthRowKey = healthKey
+		end
+		local healthLine = MI2_TooltipHealthRow
+		if healthLine then
+			if MobInfoConfig.CompactMode == 1 then
+				healthLine:SetText( mifontGold.."HP    "..mifontWhite..healthText )
+			else
+				healthLine:SetText( mifontWhite..healthText )
+			end
 		end
 	end
 
 	if MI2_ManaLine then
 		local manaText = mifontWhite..UnitMana("mouseover").." / "..UnitManaMax("mouseover")
-		local manaLine = getglobal(tooltip.."TextRight"..MI2_ManaLine)
-		if MobInfoConfig.CompactMode == 1 then
-			manaLine:SetText( manaText..mifontGold.." Mana" )
-		else
-			manaLine:SetText( manaText )
+		-- PERF: reuse the cached row object for this tooltip line.
+		local manaKey = tooltip.."TextRight"..MI2_ManaLine
+		if MI2_TooltipManaRowKey ~= manaKey then
+			MI2_TooltipManaRow = getglobal(manaKey)
+			MI2_TooltipManaRowKey = manaKey
+		end
+		local manaLine = MI2_TooltipManaRow
+		if manaLine then
+			if MobInfoConfig.CompactMode == 1 then
+				manaLine:SetText( manaText..mifontGold.." Mana" )
+			else
+				manaLine:SetText( manaText )
+			end
 		end
 	end
 end -- MI2_UpdateTooltipHealthMana()
