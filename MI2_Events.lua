@@ -63,7 +63,7 @@ local function MI2_VariablesLoaded()
 	-- check for presence of separate interferring MobHealth AddOn
 	-- initialize built-in MobHealth if not disabled
 	MI2_CheckForSeparateMobHealth()
-	MI2_SuppressDefaultTargetStatusText()
+	MI2_SetupBarTextStrings()
 	if  MobInfoConfig.DisableHealth < 2  then
 		MI2_MobHealth_SetPos()
 	end

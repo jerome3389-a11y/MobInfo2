@@ -546,7 +546,7 @@
 					<!-- ==================================================== -->
 					<!-- subframe with Mob Health options					  -->
 					<Frame name="MI2_FrmHealthOptions" inherits="MI2_OptionsFrameTemplate" hidden="true" >
-						<Size> <AbsDimension x="420" y="320" />	</Size>
+						<Size> <AbsDimension x="420" y="350" />	</Size>
 						<Anchors>
 							<Anchor	point="TOPLEFT"	>
 								<Offset> <AbsDimension x="10" y="-30" /> </Offset>
@@ -666,6 +666,15 @@
 									</Slider>
 								</Frames>
 							</Frame>
+
+							<!-- LARGE TEXT: large health numbers on player and target bars -->
+							<CheckButton name="MI2_OptLargeHealthText" inherits="MI2_CheckboxTemplate">
+								<Anchors>
+									<Anchor	point="TOPLEFT"	relativeTo="MI2_FrmManaValueOptions" relativePoint="BOTTOMLEFT">
+										<Offset> <AbsDimension x="10" y="-10" /> </Offset>
+									</Anchor>
+								</Anchors>
+							</CheckButton>
 						</Frames>
 					</Frame>
 

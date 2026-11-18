@@ -835,6 +835,8 @@ end -- midebug()
 	if  not MobInfoConfig.TargetMana	then  MobInfoConfig.TargetMana = 1		end
 	if  not MobInfoConfig.HealthPercent	then  MobInfoConfig.HealthPercent = 1	end
 	if  not MobInfoConfig.ManaPercent	then  MobInfoConfig.ManaPercent = 1		end
+	-- LARGE TEXT: large health numbers on player and target health bars, default ON
+	if  not MobInfoConfig.LargeHealthText	then  MobInfoConfig.LargeHealthText = 1	end
 	if  not MobInfoConfig.HealthPosX	then  MobInfoConfig.HealthPosX = -7		end
 	if  not MobInfoConfig.HealthPosY	then  MobInfoConfig.HealthPosY = 11		end
 	if  not MobInfoConfig.ManaPosX		then  MobInfoConfig.ManaPosX = -7		end

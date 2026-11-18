@@ -244,6 +244,9 @@ MI2_OPTIONS["MI2_OptHealthPercent"] =
 MI2_OPTIONS["MI2_OptManaPercent"] = 
 { text = "Show Percent"; help = "Add percentage to mana in target frame"; }
 
+MI2_OPTIONS["MI2_OptLargeHealthText"] = 
+{ text = "Large Health Text"; help = "Show large health numbers on player and target health bars"; }
+
 MI2_OPTIONS["MI2_OptHealthPosX"] = 
 { text = "Horizontal Position"; help = "Adjust horizontal position of health in target frame"; }
 

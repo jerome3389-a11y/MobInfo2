@@ -212,22 +212,33 @@ function MobHealth_Display( )
 		MI2_MobManaText:SetText( newManaText )
 		lLastManaText = newManaText
 	end
+	-- SUPPRESS: keep the on-bar large text in sync with the estimate
+	MI2_UpdateBarTextStrings()
 end	 --	MobHealth_Display()
 
 
 -----------------------------------------------------------------------------
--- MI2_SuppressDefaultTargetStatusText()
+-- SUPPRESS / LARGE TEXT: replace the bars' default TextString
 --
--- Hide Blizzard's default target health/mana text when MobInfo displays
--- those values itself, so the two don't overlap on the target frame.
--- (ShaguTweaks' "Real Health Numbers" does the same thing by replacing
--- the bar's TextString with its own font string.)
---
--- Only Blizzard's DEFAULT text is hidden: if another addon has replaced
--- the bar's TextString with its own font string, that string is left
--- alone. The default TextString is a child of its own bar, while a
--- replacement is parented to a different frame.
+-- Blizzard's default target health/mana text cannot be reliably hidden
+-- with :Hide(): the game re-shows it on every status bar update, which
+-- is why the old Hide-based suppression did not work in game.
+-- ShaguTweaks solves this by REPLACING the bar's TextString with its
+-- own font string, so the default text has nowhere to show. MobInfo2
+-- does the same: while MobInfo2's own health/mana display is on, the
+-- bar's TextString is swapped for a MobInfo2-owned font string, and
+-- the original is restored when the display is off.
+-- The owned strings also carry the optional large health text on the
+-- player and target health bars (MobInfoConfig.LargeHealthText).
 -----------------------------------------------------------------------------
+local MI2_TargetHealthText, MI2_TargetManaText, MI2_PlayerHealthText
+local MI2_BarTextStrings = {}  -- [statusBar] = { orig = <original TextString>, owned = <owned font string> }
+local MI2_LastBarText = {}     -- [owned font string] = last text set on it
+local MI2_BarTextHookInstalled = false
+
+-- SUPPRESS: true when the bar still shows Blizzard's own TextString.
+-- A replacement string from another addon is parented to a different
+-- frame, so it is left alone and never clobbered.
 local function MI2_IsDefaultTargetStatusText( statusBar )
 	local textString = statusBar.TextString
 	if  not textString  then
@@ -236,37 +247,206 @@ local function MI2_IsDefaultTargetStatusText( statusBar )
 	return textString:GetParent() == statusBar
 end
 
-local function MI2_HideDefaultTargetStatusText( statusBar )
-	if  MobInfoConfig.DisableHealth ~= 0  then
-		return
-	end
-
-	local hideText
-	if  statusBar == TargetFrameHealthBar  then
-		hideText = MobInfoConfig.TargetHealth == 1 or MobInfoConfig.HealthPercent == 1
-	elseif  statusBar == TargetFrameManaBar  then
-		hideText = MobInfoConfig.TargetMana == 1 or MobInfoConfig.ManaPercent == 1
-	end
-
-	if  hideText and MI2_IsDefaultTargetStatusText( statusBar )  then
-		statusBar.TextString:Hide()
+-- SUPPRESS: abbreviate a large number, ShaguTweaks style.
+-- 1160 stays "1160", 12500 becomes "12.5k", 1500000 becomes "1.5m".
+local function MI2_AbbreviateNumber( value )
+	value = math.floor( value + 0.5 )
+	if value >= 1000000 then
+		return string.format( "%.1fm", value / 1000000 )
+	elseif value >= 10000 then
+		return string.format( "%.1fk", value / 1000 )
+	else
+		return tostring( value )
 	end
 end
 
-function MI2_SuppressDefaultTargetStatusText()
-	local originalUpdateTextString = TextStatusBar_UpdateTextString
+-- SUPPRESS: swap a bar's TextString to the MobInfo2-owned string.
+-- The original is saved the first time so it can be restored later.
+local function MI2_ReplaceBarTextString( statusBar, ownedString )
+	local entry = MI2_BarTextStrings[statusBar]
+	if  not entry  then
+		if  not MI2_IsDefaultTargetStatusText( statusBar )  then
+			return  -- another addon owns the text, leave it alone
+		end
+		entry = { orig = statusBar.TextString, owned = ownedString }
+		MI2_BarTextStrings[statusBar] = entry
+	end
+	if  statusBar.TextString == entry.orig  then
+		statusBar.TextString = entry.owned
+	end
+end
 
+-- SUPPRESS: restore a bar's original TextString (only if it is still ours).
+local function MI2_RestoreBarTextString( statusBar )
+	local entry = MI2_BarTextStrings[statusBar]
+	if  entry and statusBar.TextString == entry.owned  then
+		statusBar.TextString = entry.orig
+	end
+end
+
+-- LARGE TEXT: text for the target health bar, ShaguTweaks style:
+-- "cur - pct%" while below max, Abbreviate(cur) at full health.
+-- Prefers MobInfo2's own health estimate; falls back to the bar values.
+-- Returns "" when there is nothing to show (no target, dead, ghost).
+local function MI2_GetTargetBarText()
+	if  not UnitExists("target")  then
+		return ""
+	end
+	if  UnitIsDead("target") or UnitIsGhost("target")  then
+		return ""
+	end
+	local cur, max, percent
+	if  MI2_Target.showHealth and MI2_Target.curHealth and MI2_Target.maxHealth and MI2_Target.maxHealth > 0  then
+		cur = MI2_Target.curHealth
+		max = MI2_Target.maxHealth
+		percent = MI2_Target.unitHealth or math.floor( 100.0 * cur / max + 0.5 )
+	else
+		cur = TargetFrameHealthBar:GetValue()
+		local _, maxVal = TargetFrameHealthBar:GetMinMaxValues()
+		max = maxVal or 0
+		if  max > 0  then
+			percent = math.floor( cur / max * 100 )
+		else
+			percent = 0
+		end
+	end
+	if  max == 0  then
+		return ""
+	end
+	if  cur == percent  then
+		-- the bar reports percent (0-100), not real health
+		return percent .. "%"
+	elseif  cur < max  then
+		return MI2_AbbreviateNumber(cur) .. " - " .. percent .. "%"
+	else
+		return MI2_AbbreviateNumber(cur)
+	end
+end
+
+-- SUPPRESS: set an owned string's text only when it changed, and
+-- hide it when empty. Mirrors the PERF change-check in MobHealth_Display.
+local function MI2_SetOwnedBarText( ownedString, newText )
+	if  MI2_LastBarText[ownedString] ~= newText  then
+		MI2_LastBarText[ownedString] = newText
+		ownedString:SetText( newText )
+	end
+	if  newText == ""  then
+		ownedString:Hide()
+	else
+		ownedString:Show()
+	end
+end
+
+-- SUPPRESS: refresh the text of every bar whose TextString is ours.
+-- Called after the game updates a bar, after config changes, and
+-- after MobHealth_Display, so the on-bar text stays in sync.
+function MI2_UpdateBarTextStrings()
+	if  not MI2_TargetHealthText  then
+		return  -- not set up yet
+	end
+	if  TargetFrameHealthBar.TextString == MI2_TargetHealthText  then
+		if  MobInfoConfig.LargeHealthText == 1  then
+			MI2_SetOwnedBarText( MI2_TargetHealthText, MI2_GetTargetBarText() )
+		else
+			MI2_SetOwnedBarText( MI2_TargetHealthText, "" )
+		end
+	end
+	if  TargetFrameManaBar.TextString == MI2_TargetManaText  then
+		-- suppression only, no large mana text
+		MI2_SetOwnedBarText( MI2_TargetManaText, "" )
+	end
+	if  PlayerFrameHealthBar.TextString == MI2_PlayerHealthText  then
+		if  MobInfoConfig.LargeHealthText == 1  then
+			MI2_SetOwnedBarText( MI2_PlayerHealthText, MI2_AbbreviateNumber( UnitHealth("player") ) )
+		else
+			MI2_SetOwnedBarText( MI2_PlayerHealthText, "" )
+		end
+	end
+end
+
+-- SUPPRESS: replace or restore each managed bar's TextString according
+-- to the current config. Target bars are replaced while MobInfo2's own
+-- health/mana display is on (so the default text has nowhere to
+-- show); the player bar is replaced only while LargeHealthText is on.
+-- With a separate MobHealth addon present (DisableHealth == 2)
+-- MobInfo2's own display is off, so everything is restored.
+function MI2_ApplyBarTextStrings()
+	if  not MI2_TargetHealthText  then
+		return  -- not set up yet
+	end
+	if  MobInfoConfig.DisableHealth == 2  then
+		MI2_RestoreBarTextString( TargetFrameHealthBar )
+		MI2_RestoreBarTextString( TargetFrameManaBar )
+		MI2_RestoreBarTextString( PlayerFrameHealthBar )
+		return
+	end
+	if  MobInfoConfig.DisableHealth == 0 and (MobInfoConfig.TargetHealth == 1 or MobInfoConfig.HealthPercent == 1)  then
+		MI2_ReplaceBarTextString( TargetFrameHealthBar, MI2_TargetHealthText )
+	else
+		MI2_RestoreBarTextString( TargetFrameHealthBar )
+	end
+	if  MobInfoConfig.DisableHealth == 0 and (MobInfoConfig.TargetMana == 1 or MobInfoConfig.ManaPercent == 1)  then
+		MI2_ReplaceBarTextString( TargetFrameManaBar, MI2_TargetManaText )
+	else
+		MI2_RestoreBarTextString( TargetFrameManaBar )
+	end
+	if  MobInfoConfig.LargeHealthText == 1  then
+		MI2_ReplaceBarTextString( PlayerFrameHealthBar, MI2_PlayerHealthText )
+	else
+		MI2_RestoreBarTextString( PlayerFrameHealthBar )
+	end
+	MI2_UpdateBarTextStrings()
+end
+
+-- SUPPRESS: install the TextStatusBar_UpdateTextString hook once.
+-- The game writes into bar.TextString after every bar update; for
+-- managed bars that is our owned string, so refresh it here. Bars we
+-- do not own are left untouched.
+local function MI2_InstallBarTextHook()
+	if  MI2_BarTextHookInstalled  then
+		return
+	end
+	MI2_BarTextHookInstalled = true
+	local originalUpdateTextString = TextStatusBar_UpdateTextString
 	TextStatusBar_UpdateTextString = function( statusBar )
 		if  not statusBar  then
 			statusBar = this
 		end
-
 		originalUpdateTextString( statusBar )
-		MI2_HideDefaultTargetStatusText( statusBar )
+		MI2_UpdateBarTextStrings()
 	end
+end
 
-	MI2_HideDefaultTargetStatusText( TargetFrameHealthBar )
-	MI2_HideDefaultTargetStatusText( TargetFrameManaBar )
+-- SUPPRESS: create the owned font strings (once), install the hook,
+-- and apply the current config. Called from MI2_VariablesLoaded.
+-- Font and size match ShaguTweaks (STANDARD_TEXT_FONT, 10, OUTLINE).
+function MI2_SetupBarTextStrings()
+	if  not MI2_TargetHealthText  then
+		local targetTexts = CreateFrame( "Frame", nil, TargetFrame )
+		targetTexts:SetAllPoints( TargetFrame )
+		MI2_TargetHealthText = targetTexts:CreateFontString( "MI2_TargetHealthBarText", "OVERLAY" )
+		MI2_TargetHealthText:SetPoint( "TOP", TargetFrameHealthBar, "BOTTOM", -2, 23 )
+		MI2_TargetHealthText:SetFontObject( "GameFontWhite" )
+		MI2_TargetHealthText:SetFont( STANDARD_TEXT_FONT, 10, "OUTLINE" )
+		MI2_TargetHealthText:SetHeight( 32 )
+		MI2_TargetHealthText:SetJustifyH( "CENTER" )
+		MI2_TargetManaText = targetTexts:CreateFontString( "MI2_TargetManaBarText", "OVERLAY" )
+		MI2_TargetManaText:SetPoint( "TOP", TargetFrameManaBar, "BOTTOM", -2, 22 )
+		MI2_TargetManaText:SetFontObject( "GameFontWhite" )
+		MI2_TargetManaText:SetFont( STANDARD_TEXT_FONT, 10, "OUTLINE" )
+		MI2_TargetManaText:SetHeight( 32 )
+		MI2_TargetManaText:SetJustifyH( "CENTER" )
+		local playerTexts = CreateFrame( "Frame", nil, PlayerFrame )
+		playerTexts:SetAllPoints( PlayerFrame )
+		MI2_PlayerHealthText = playerTexts:CreateFontString( "MI2_PlayerHealthBarText", "OVERLAY" )
+		MI2_PlayerHealthText:SetPoint( "CENTER", PlayerFrameHealthBar, "CENTER", 0, 0 )
+		MI2_PlayerHealthText:SetFontObject( "GameFontWhite" )
+		MI2_PlayerHealthText:SetFont( STANDARD_TEXT_FONT, 10, "OUTLINE" )
+		MI2_PlayerHealthText:SetHeight( 32 )
+		MI2_PlayerHealthText:SetJustifyH( "CENTER" )
+	end
+	MI2_InstallBarTextHook()
+	MI2_ApplyBarTextStrings()
 end
 
 
@@ -318,6 +498,10 @@ function MI2_MobHealth_SetPos( )
 
 	-- redisplay health /	mana values
 	MobHealth_Display()
+
+	-- SUPPRESS: re-apply bar TextString replace/restore (config may
+	-- have changed, e.g. the LargeHealthText toggle)
+	MI2_ApplyBarTextStrings()
 end	 --	of MI2_MobHealth_SetPos()
 
 
