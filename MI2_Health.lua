@@ -236,17 +236,6 @@ local MI2_BarTextStrings = {}  -- [statusBar] = { orig = <original TextString>, 
 local MI2_LastBarText = {}     -- [owned font string] = last text set on it
 local MI2_BarTextHookInstalled = false
 
--- SUPPRESS: true when the bar still shows Blizzard's own TextString.
--- A replacement string from another addon is parented to a different
--- frame, so it is left alone and never clobbered.
-local function MI2_IsDefaultTargetStatusText( statusBar )
-	local textString = statusBar.TextString
-	if  not textString  then
-		return false
-	end
-	return textString:GetParent() == statusBar
-end
-
 -- SUPPRESS: abbreviate a large number, ShaguTweaks style.
 -- 1160 stays "1160", 12500 becomes "12.5k", 1500000 becomes "1.5m".
 local function MI2_AbbreviateNumber( value )
@@ -262,17 +251,27 @@ end
 
 -- SUPPRESS: swap a bar's TextString to the MobInfo2-owned string.
 -- The original is saved the first time so it can be restored later.
+-- NOTE: ShaguTweaks replaces unconditionally (no parent check) and works.
+-- The old parent check (MI2_IsDefaultTargetStatusText) blocked the swap
+-- in Turtle WoW, so it is gone: adopt whatever TextString the bar has
+-- now, unless it is already one of ours. Restore puts it back.
 local function MI2_ReplaceBarTextString( statusBar, ownedString )
 	local entry = MI2_BarTextStrings[statusBar]
 	if  not entry  then
-		if  not MI2_IsDefaultTargetStatusText( statusBar )  then
-			return  -- another addon owns the text, leave it alone
+		local current = statusBar.TextString
+		if  not current or current == ownedString  then
+			return  -- nothing to adopt, or already ours
 		end
-		entry = { orig = statusBar.TextString, owned = ownedString }
+		entry = { orig = current, owned = ownedString }
 		MI2_BarTextStrings[statusBar] = entry
 	end
 	if  statusBar.TextString == entry.orig  then
 		statusBar.TextString = entry.owned
+		-- SUPPRESS: the original string was already shown by the game
+		-- before the swap, so it stays visible unless hidden here.
+		-- Without this the bar shows both the original and ours.
+		entry.orig:Hide()
+		entry.orig:SetText("")
 	end
 end
 
@@ -281,6 +280,9 @@ local function MI2_RestoreBarTextString( statusBar )
 	local entry = MI2_BarTextStrings[statusBar]
 	if  entry and statusBar.TextString == entry.owned  then
 		statusBar.TextString = entry.orig
+		-- refresh the original's text and show it right away, so the
+		-- bar does not stay empty until its value next changes
+		TextStatusBar_UpdateTextString( statusBar )
 	end
 end
 
